@@ -6,6 +6,14 @@ namespace ZombieCoop
     /// Процедурный этаж: комнаты на сетке, двери между соседними, выход в самой дальней
     /// от старта комнате. Чем выше этаж, тем больше комнат и зомби.
     /// Зомби стоят по комнатам и не знают об игроках, пока не заметят или не услышат.
+    /// Стеклянное окно в наружной стене: комната, сторона стены и само окно.
+    public class GlassWall
+    {
+        public Vector2Int cell;
+        public Vector2Int dir;
+        public GlassWindow window;
+    }
+
     public class LevelGenerator
     {
         public const float CELL = 9f;
@@ -16,9 +24,13 @@ namespace ZombieCoop
         /// Насколько сдвинута дверь от середины стены, если она у левого или правого края.
         const float DOOR_SIDE = 2.6f;
         const int MAX_ZOMBIES = 150;
+        /// Доля наружных стен со стеклом и минимум таких стен на этаже.
+        const float GLASS_SHARE = 0.4f;
+        const int GLASS_MIN = 3;
         static readonly Vector2Int[] Dirs = { new Vector2Int(1, 0), new Vector2Int(-1, 0), new Vector2Int(0, 1), new Vector2Int(0, -1) };
 
         Rng rng = new Rng(0);
+        int rngSeed;
         public List<Vector2Int> cells = new List<Vector2Int>();
         public Dictionary<Vector2Int, List<Vector2Int>> links = new Dictionary<Vector2Int, List<Vector2Int>>();
         /// Сдвиг двери вдоль стены для каждой пары соседних комнат: 0 — по центру,
@@ -32,6 +44,11 @@ namespace ZombieCoop
         /// Что расставлено на этаже (для проверок).
         public readonly List<Zombie> zombies = new List<Zombie>();
         public readonly List<Pickup> pickups = new List<Pickup>();
+        /// Стеклянные окна этажа. Решения о стекле берут отдельный генератор, поэтому
+        /// планировка и остальные случайности для того же seed не меняются.
+        public readonly List<GlassWall> glassWalls = new List<GlassWall>();
+        public List<GlassWall> GlassWalls => glassWalls;
+        readonly HashSet<(Vector2Int, Vector2Int)> glassKeys = new HashSet<(Vector2Int, Vector2Int)>();
 
         public static int RoomCount(int floorNumber) => Mathf.Min(5 + 2 * floorNumber, 45);
 
@@ -41,6 +58,7 @@ namespace ZombieCoop
         public List<Vector3> Build(Transform world, int floorNumber, int players, int seed)
         {
             rng = new Rng(seed);
+            rngSeed = seed;
             Layout(RoomCount(floorNumber));
             ComputePaths();
             int far = 0;
@@ -166,6 +184,7 @@ namespace ZombieCoop
         void BuildGeometry(Transform world)
         {
             WorldEnvironment.Setup(0.05f, 0.045f);
+            PickGlass();
             foreach (var c in cells)
             {
                 var b = Center(c);
@@ -184,6 +203,37 @@ namespace ZombieCoop
                 if (c != startCell && c != exitCell) Props(world, c);
             }
             ExitMarker(world);
+            BuildCity(world);
+        }
+
+        /// Ночной город вокруг этажа: свой на каждом этаже, тот же для того же seed.
+        void BuildCity(Transform world)
+        {
+            var lo = new Vector3(float.PositiveInfinity, 0f, float.PositiveInfinity);
+            var hi = new Vector3(float.NegativeInfinity, 0f, float.NegativeInfinity);
+            var half = new Vector3(CELL, 0f, CELL) / 2f;
+            foreach (var c in cells)
+            {
+                lo = Vector3.Min(lo, Center(c) - half);
+                hi = Vector3.Max(hi, Center(c) + half);
+            }
+            City.Build(world, lo, hi, unchecked(rngSeed + 104729));
+        }
+
+        /// Выбирает наружные стены (за ними нет комнаты), в которых будет стекло.
+        void PickGlass()
+        {
+            glassWalls.Clear();
+            glassKeys.Clear();
+            var outer = new List<(Vector2Int, Vector2Int)>();
+            foreach (var c in cells)
+                foreach (var d in Dirs)
+                    if (!links.ContainsKey(c + d)) outer.Add((c, d));
+            var grng = new System.Random(unchecked(rngSeed + 7919));
+            int want = outer.Count <= GLASS_MIN ? outer.Count : Mathf.Max(GLASS_MIN, Mathf.FloorToInt(outer.Count * GLASS_SHARE + 0.5f));
+            // Тасуем своим генератором, а не rng и не глобальным.
+            G.Shuffle(outer, grng);
+            for (int i = 0; i < want; i++) glassKeys.Add(outer[i]);
         }
 
         void Wall(Transform world, Vector2Int c, Vector2Int d, bool door)
@@ -191,6 +241,17 @@ namespace ZombieCoop
             var mid = Center(c) + new Vector3(d.x, 0, d.y) * CELL / 2f + Vector3.up * HEIGHT / 2f;
             bool alongZ = d.x != 0;
             float shade = rng.Range(0.45f, 0.65f);
+            if (!door && glassKeys.Contains((c, d)))
+            {
+                var go = new GameObject("Window");
+                go.layer = Layers.World;
+                go.transform.SetParent(world, false);
+                go.transform.position = mid;
+                var window = go.AddComponent<GlassWindow>();
+                window.Setup(d);
+                glassWalls.Add(new GlassWall { cell = c, dir = d, window = window });
+                return;
+            }
             if (!door)
             {
                 WorldEnvironment.Box(world, alongZ ? new Vector3(WALL, HEIGHT, CELL) : new Vector3(CELL, HEIGHT, WALL), mid, shade);

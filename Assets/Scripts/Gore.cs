@@ -262,7 +262,9 @@ namespace ZombieCoop
             else rot = Quaternion.AngleAxis(G.Rand(0f, 360f), normal) * Quaternion.FromToRotation(Vector3.up, normal);
 
             var go = new GameObject("Stain " + kind);
-            go.transform.SetParent(GameRoot.World, false);
+            // Пятно на стекле принадлежит секции и исчезает, когда она разбивается.
+            var glass = hit.collider.GetComponent<GlassSection>();
+            go.transform.SetParent(glass != null ? glass.transform : GameRoot.World, false);
             go.AddComponent<MeshFilter>().sharedMesh = BloodStains.Mesh;
             var mr = go.AddComponent<MeshRenderer>();
             mr.sharedMaterial = BloodStains.Material(kind);

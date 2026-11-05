@@ -56,6 +56,12 @@ namespace ZombieCoop
         const int MAX_CORPSES = 30;
         /// Прочность трупа: сколько ещё нужно всадить, чтобы он развалился на куски.
         const float CORPSE_HP = 160f;
+        /// Ниже этой высоты зомби считается падающим за край этажа.
+        const float FALL_TRIGGER_Y = -1.5f;
+        /// Минимальная скорость вылета наружу, м/с.
+        const float FALL_OUT_SPEED = 2f;
+        /// Ниже этой высоты упавший исчезает.
+        const float FALL_DESPAWN_Y = -30f;
 
         public class ZoneDef
         {
@@ -97,6 +103,10 @@ namespace ZombieCoop
         public LevelGenerator level;
         /// Заметил ли игроков. В режиме волн зомби сразу знают, где все; на этажах — стоят, пока не заметят.
         public bool aware = true;
+        /// Вылетел из окна и падает: тело больше ни с чем не сталкивается.
+        public bool falling;
+        /// Игрок, который последним ударил или ударил ногой: ему засчитывается падение.
+        public Player lastAttacker;
 
         float groanTimer;
         public float lookTimer;
@@ -158,6 +168,10 @@ namespace ZombieCoop
         public bool landed;
         /// Середина лежащего трупа.
         public Vector3 corpseCenter;
+
+        Vector3 fallOutDir = Vector3.forward;
+        float fallSpin = 3f;
+        Vector3 fallAxis = Vector3.right;
 
         public Vector3 Knock => knock;
         public float Fall => fall;
@@ -398,6 +412,17 @@ namespace ZombieCoop
         {
             float delta = Time.deltaTime;
             if (delta <= 0f) return;
+            // Ушёл под этаж без окна (например, труп соскользнул с края): тоже падение.
+            if (!falling && transform.position.y < FALL_TRIGGER_Y)
+            {
+                var away = G.Flat(knock);
+                FallOut(away.magnitude > 0.1f ? away : Vector3.forward);
+            }
+            if (falling)
+            {
+                FallOutProcess(delta);
+                return;
+            }
             if (dead)
             {
                 CorpseProcess(delta);
@@ -896,9 +921,10 @@ namespace ZombieCoop
         // --- Попадания ------------------------------------------------------------
 
         /// Попадание пули. Возвращает true, если зомби умер.
-        public bool TakeHit(string zone, float damage, Vector3 point, Vector3 dir, bool loud = true, float force = 1f)
+        public bool TakeHit(string zone, float damage, Vector3 point, Vector3 dir, bool loud = true, float force = 1f, Player attacker = null)
         {
             if (dead || !zoneHp.ContainsKey(zone)) return false;
+            if (attacker != null) lastAttacker = attacker;
             Alert();
             Push(GlanceDir(point, dir), force);
             Jolt(zone, point, dir, force);
@@ -966,6 +992,7 @@ namespace ZombieCoop
                 if (to.magnitude > BUMP_RADIUS || Vector3.Dot(to, dir) < 0f) continue;
                 bumped.Add(other);
                 other.bumped.Add(this);
+                if (lastAttacker != null) other.lastAttacker = lastAttacker;
                 // Как бильярдные шары: сбитый летит по линии между центрами, ударивший
                 // отскакивает в другую сторону. Чем больше вскользь, тем сильнее разлёт.
                 var line = to.normalized;
@@ -992,9 +1019,10 @@ namespace ZombieCoop
         }
 
         /// Удар ногой: сильный толчок с падением навзничь и немного урона корпусу.
-        public void Kicked(Vector3 dir, float speed, float damage)
+        public void Kicked(Vector3 dir, float speed, float damage, Player attacker = null)
         {
             if (dead) return;
+            if (attacker != null) lastAttacker = attacker;
             Alert();
             bumped.Clear();
             Push(dir, speed);
@@ -1061,7 +1089,7 @@ namespace ZombieCoop
 
         public void KeepAboveFloor()
         {
-            if (body == null) return;
+            if (body == null || falling) return;
             if (!(crawling || dead || knockedDown > 0f || fall > 0.05f))
             {
                 // Идущий: руки до пола не достают, проверить только ступни — если ушли
@@ -1957,6 +1985,50 @@ namespace ZombieCoop
             fallPivot = Vector3.zero;
             fallVel = Mathf.Max(fallVel, speed);
             deathStage = "topple";
+        }
+
+        /// Вылет из окна: живой умирает (убийство засчитывается тому, кто его толкнул),
+        /// труп и ползущий просто падают. Повторный вызов ничего не меняет.
+        public void FallOut(Vector3 outward)
+        {
+            if (falling) return;
+            falling = true;
+            var o = G.Flat(outward);
+            fallOutDir = o.magnitude > 0.01f ? o.normalized : Vector3.forward;
+            // Фасад и соседей больше не задеваем, и в зоне падения тело уже не считается.
+            if (cc != null) cc.enabled = false;
+            velocity.y = Mathf.Min(velocity.y, 0f);
+            fallSpin = G.Rand(2f, 4f);
+            fallAxis = Quaternion.AngleAxis(G.Rand(-0.5f, 0.5f) * Mathf.Rad2Deg, Vector3.up) * Vector3.Cross(fallOutDir, Vector3.up);
+            if (dead) return;
+            dead = true;
+            All.Remove(this);
+            if (!Corpses.Contains(this)) Corpses.Add(this);
+            while (Corpses.Count > MAX_CORPSES)
+            {
+                var old = Corpses[0];
+                Corpses.RemoveAt(0);
+                if (old != null && old != this) Destroy(old.gameObject);
+            }
+            // Прощальный крик остаётся в точке вылета и затихает, пока зомби летит вниз.
+            Sfx.PlayAt(G.Pick("shriek", "death"), transform.position + Vector3.up, CRY_DB + 4f, voice);
+            if (lastAttacker != null) lastAttacker.kills++;
+            Died?.Invoke("fall");
+        }
+
+        void FallOutProcess(float delta)
+        {
+            velocity.y -= GRAVITY * delta;
+            float along = Mathf.Max(Vector3.Dot(knock, fallOutDir) * Mathf.Exp(-delta), FALL_OUT_SPEED);
+            knock = fallOutDir * along;
+            transform.position += new Vector3(knock.x, velocity.y, knock.z) * delta;
+            if (fallAxis.magnitude > 0.01f)
+                transform.Rotate(fallAxis.normalized, fallSpin * delta * Mathf.Rad2Deg, Space.World);
+            if (transform.position.y < FALL_DESPAWN_Y)
+            {
+                Corpses.Remove(this);
+                Destroy(gameObject);
+            }
         }
 
         void CorpseProcess(float delta)

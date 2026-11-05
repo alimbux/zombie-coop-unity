@@ -55,6 +55,13 @@ namespace ZombieCoop
         const float KICK_DAMAGE = 8f;
         /// Насколько сильно нецентральный удар уводит вбок (1 — под 45°).
         const float KICK_SIDE = 0.8f;
+        /// Ниже этой высоты игрок считается падающим за край этажа; ниже FALL_FREEZE_Y тело замирает.
+        const float FALL_TRIGGER_Y = -1.5f;
+        const float FALL_FREEZE_Y = -30f;
+        const float FALL_OUT_SPEED = 2f;
+        /// Через сколько секунд падения экран темнеет и за сколько камера запрокидывается.
+        const float FALL_BLACKOUT = 1.2f;
+        const float FALL_LOOK_TIME = 1f;
         /// Поза оружия в середине перезарядки: нос вверх, низом к центру экрана, чтобы был виден магазин.
         static readonly Vector3 RELOAD_TURN = new Vector3(0.35f, 0f, -0.6f);
         static readonly Vector3 RELOAD_SHIFT = new Vector3(-0.05f, 0.08f, 0f);
@@ -73,6 +80,8 @@ namespace ZombieCoop
         /// Наклон взгляда в радианах (вверх — плюс).
         public float pitch;
         public int kills;
+        /// Выпал из окна: до конца этажа не встаёт, на следующий возвращается только с ножом.
+        public bool fell;
 
         public List<string> owned = new List<string> { "knife" };
         public string current = "knife";
@@ -94,6 +103,9 @@ namespace ZombieCoop
         float kickAnim;
         CharacterController cc;
         Vector3 velocity;
+        Vector3 fallDir = Vector3.forward;
+        float fallAlong, fallVelY, fallTime, fallPitch0, fallYaw0;
+        bool fallFrozen;
 
         public static Player Create(int index, PlayerInput input, Camera cam, PlayerHud hud, Vector3 position)
         {
@@ -147,6 +159,20 @@ namespace ZombieCoop
 
         public Loadout GetLoadout()
         {
+            if (fell)
+            {
+                // Выпавший начинает следующий этаж с одним ножом, без оружия и патронов.
+                var none = new Dictionary<string, int>();
+                foreach (var w in Weapons.Order) none[w] = 0;
+                return new Loadout
+                {
+                    owned = new List<string> { "knife" },
+                    current = "knife",
+                    mag = new Dictionary<string, int>(none),
+                    reserve = new Dictionary<string, int>(none),
+                    kills = kills,
+                };
+            }
             return new Loadout
             {
                 owned = new List<string>(owned),
@@ -243,6 +269,17 @@ namespace ZombieCoop
         {
             float delta = Time.deltaTime;
             if (delta <= 0f) return;
+            // Сошёл с края разбитого окна: пола под ногами нет.
+            if (!fell && transform.position.y < FALL_TRIGGER_Y)
+            {
+                var away = new Vector3(velocity.x, 0f, velocity.z);
+                FallOut(away.magnitude > 0.1f ? away : Forward);
+            }
+            if (fell)
+            {
+                FallOutProcess(delta);
+                return;
+            }
             fireCooldown -= delta;
             kickCooldown -= delta;
             kickAnim = Mathf.Max(0f, kickAnim - delta / KICK_COOLDOWN);
@@ -361,7 +398,7 @@ namespace ZombieCoop
             var toBest = best.transform.position - transform.position;
             float off = Mathf.Clamp(Vector3.Dot(toBest, right) / 0.45f, -1f, 1f);
             var dir = (forward + right * off * KICK_SIDE).normalized;
-            best.Kicked(dir, KICK_SPEED, KICK_DAMAGE);
+            best.Kicked(dir, KICK_SPEED, KICK_DAMAGE, this);
             Sfx.PlayAt("crunch", best.transform.position + Vector3.up, -4f, 0.8f);
             return best;
         }
@@ -391,6 +428,13 @@ namespace ZombieCoop
             {
                 var dir = (ct.forward + ct.right * G.Rand(-st.spread, st.spread) + ct.up * G.Rand(-st.spread, st.spread)).normalized;
                 if (!Ray(dir, st.range, out var hit)) continue;
+                var glass = hit.collider.GetComponent<GlassSection>();
+                if (glass != null)
+                {
+                    // Стекло бьют только пули: дробины одного выстрела складываются, нож и ноги не бьют.
+                    if (!st.melee) glass.Hit(st.damage, hit.point, dir);
+                    continue;
+                }
                 if (hit.rigidbody != null && hit.collider.GetComponent<HitZone>() == null)
                 {
                     // Трупы и оторванные части отлетают от выстрела.
@@ -412,7 +456,7 @@ namespace ZombieCoop
                 }
                 bool loud = !hitZombies.Contains(zone.zombie);
                 hitZombies.Add(zone.zombie);
-                if (zone.zombie.TakeHit(zone.zone, st.damage, hit.point, dir, loud, st.knockback)) kills++;
+                if (zone.zombie.TakeHit(zone.zone, st.damage, hit.point, dir, loud, st.knockback, this)) kills++;
                 if (first == "") first = zone.zone;
             }
             if (first != "") hud?.FlashHit(first == "head");
@@ -497,9 +541,9 @@ namespace ZombieCoop
             reserve[current] -= take;
         }
 
-        void TryRevive(float delta)
+        public void TryRevive(float delta)
         {
-            if (!downed) return;
+            if (!downed || fell) return;
             bool helped = false;
             foreach (var p in All)
                 if (p != this && !p.downed && Vector3.Distance(p.transform.position, transform.position) < REVIVE_RANGE)
@@ -511,6 +555,53 @@ namespace ZombieCoop
                 hp = 50f;
                 reviveProgress = 0f;
             }
+        }
+
+        /// Выпал из окна: умирает до конца этажа, поднять нельзя. Повторный вызов ничего не меняет.
+        public void FallOut(Vector3 outward)
+        {
+            if (fell) return;
+            fell = true;
+            downed = true;
+            hp = 0f;
+            reviveProgress = 0f;
+            reloadLeft = 0f;
+            cc.enabled = false;
+            var o = G.Flat(outward);
+            fallDir = o.magnitude > 0.01f ? o.normalized : Vector3.forward;
+            fallAlong = Mathf.Max(Vector3.Dot(new Vector3(velocity.x, 0f, velocity.z), fallDir), FALL_OUT_SPEED);
+            fallVelY = Mathf.Min(velocity.y, 0f);
+            fallTime = 0f;
+            fallPitch0 = pitch;
+            fallYaw0 = yaw;
+            if (weapon != null) weapon.gameObject.SetActive(false);
+            if (leg != null) leg.gameObject.SetActive(false);
+            if (muzzle != null) muzzle.intensity = 0f;
+            Sfx.PlayAt("shriek", transform.position + Vector3.up, 0f);
+        }
+
+        void FallOutProcess(float delta)
+        {
+            fallTime += delta;
+            if (!fallFrozen)
+            {
+                fallVelY -= GRAVITY * delta;
+                transform.position += (fallDir * fallAlong + Vector3.up * fallVelY) * delta;
+                if (transform.position.y < FALL_FREEZE_Y)
+                {
+                    fallFrozen = true;
+                    model.gameObject.SetActive(false);
+                    foreach (var b in GetComponentsInChildren<Billboard>(true)) b.gameObject.SetActive(false);
+                }
+            }
+            // Камера едет за телом и запрокидывается: видно уходящее вверх окно.
+            float k = G.Smoothstep(0f, 1f, Mathf.Clamp01(fallTime / FALL_LOOK_TIME));
+            pitch = Mathf.Lerp(fallPitch0, 1.2f, k);
+            yaw = Mathf.LerpAngle(fallYaw0, Mathf.Atan2(-fallDir.x, -fallDir.z) * Mathf.Rad2Deg, k);
+            cam.transform.SetPositionAndRotation(
+                transform.position + Vector3.up * EYE_HEIGHT,
+                Quaternion.Euler(-pitch * Mathf.Rad2Deg, yaw, 0f));
+            if (fallTime >= FALL_BLACKOUT) hud?.ShowDead("РАЗБИЛСЯ");
         }
 
         // --- Камера и модели --------------------------------------------------------
@@ -660,7 +751,8 @@ namespace ZombieCoop
         {
             cam.fieldOfView = 80f;
             cam.nearClipPlane = 0.05f;
-            cam.farClipPlane = 200f;
+            // Далеко: за окнами город и зарево на расстоянии до километра.
+            cam.farClipPlane = 1500f;
             int mask = ~0;
             mask &= ~(1 << (Layers.PlayerBody + index));
             for (int i = 0; i < MAX_PLAYERS; i++)

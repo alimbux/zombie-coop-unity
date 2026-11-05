@@ -43,10 +43,12 @@ namespace ZombieCoop
         static readonly Dictionary<string, Mesh> cache = new Dictionary<string, Mesh>();
         static readonly Dictionary<string, Material> materials = new Dictionary<string, Material>();
         public static readonly Dictionary<Mesh, ShapeInfo> Shapes = new Dictionary<Mesh, ShapeInfo>();
-        static Shader lit, unlit, text;
+        static Shader lit, unlit, text, unlitVC, glass;
 
         public static Shader LitShader => lit ? lit : (lit = Resources.Load<Shader>("ZombieCoop/Lit"));
         public static Shader UnlitShader => unlit ? unlit : (unlit = Resources.Load<Shader>("ZombieCoop/Unlit"));
+        public static Shader UnlitVCShader => unlitVC ? unlitVC : (unlitVC = Resources.Load<Shader>("ZombieCoop/UnlitVC"));
+        public static Shader GlassShader => glass ? glass : (glass = Resources.Load<Shader>("ZombieCoop/Glass"));
         public static Shader TextShader => text ? text : (text = Resources.Load<Shader>("ZombieCoop/Text"));
 
         // --- Материалы ---------------------------------------------------------
@@ -82,6 +84,17 @@ namespace ZombieCoop
             m.SetFloat("_Cutoff", cutoff);
             m.SetFloat("_Cull", doubleSided ? (float)CullMode.Off : (float)CullMode.Back);
             m.enableInstancing = true;
+            return m;
+        }
+
+        /// Неосвещённый материал с цветом вершин (город за окнами, трещины на стекле).
+        /// fog — действует ли на него туман сцены.
+        public static Material UnlitVC(Color color, bool fog, bool doubleSided)
+        {
+            var m = new Material(UnlitVCShader);
+            m.SetColor("_Color", color);
+            m.SetFloat("_Fog", fog ? 1f : 0f);
+            m.SetFloat("_Cull", doubleSided ? (float)CullMode.Off : (float)CullMode.Back);
             return m;
         }
 

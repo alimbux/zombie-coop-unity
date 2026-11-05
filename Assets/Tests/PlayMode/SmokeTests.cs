@@ -301,6 +301,183 @@ namespace ZombieCoop.Tests
         }
     
         [UnityTest]
+        public IEnumerator Glass()
+        {
+            yield return null;
+            Root.OpenMenu();
+            Assert.IsNotNull(Sfx.Clip("glass_crack"), "звук треска стекла");
+            Assert.IsNotNull(Sfx.Clip("glass_break"), "звук разбитого стекла");
+            foreach (var (floor, seed) in new[] { (1, 11), (4, 22), (9, 33), (12, 44) })
+            {
+                var world = new GameObject("TestWorld").transform;
+                GameRoot.World = world;
+                var gen = new LevelGenerator();
+                gen.Build(world, floor, 1, seed);
+                string tag = "стекло, этаж " + floor;
+                Assert.IsTrue(gen.glassWalls.Count > 0, tag + ": окна есть (" + gen.glassWalls.Count + ")");
+                bool outerOk = true, sectionsOk = true;
+                foreach (var g in gen.glassWalls)
+                {
+                    outerOk &= !gen.links.ContainsKey(g.cell + g.dir);
+                    sectionsOk &= g.window.sections.Count >= 2 && g.window.sections.Count <= 4;
+                }
+                Assert.IsTrue(outerOk, tag + ": стекло только в наружных стенах, не в дверях");
+                Assert.IsTrue(sectionsOk, tag + ": в окне 2–4 секции");
+                int outer = 0;
+                foreach (var c in gen.cells)
+                    foreach (var d in new[] { Vector2Int.right, Vector2Int.left, Vector2Int.up, Vector2Int.down })
+                        if (!gen.links.ContainsKey(c + d)) outer++;
+                Assert.GreaterOrEqual(gen.glassWalls.Count, Mathf.Min(3, outer), tag + ": окон не меньше трёх");
+                // Город вокруг этажа: башни не ближе 25 м от края.
+                var city = world.GetComponentInChildren<CityInfo>();
+                Assert.IsNotNull(city, tag + ": город построен");
+                Assert.Greater(city.towers.Count, 20, tag + ": в городе есть башни");
+                float minX = float.MaxValue, maxX = float.MinValue, minZ = float.MaxValue, maxZ = float.MinValue;
+                foreach (var c in gen.cells)
+                {
+                    var p = gen.Center(c);
+                    minX = Mathf.Min(minX, p.x - LevelGenerator.CELL / 2f);
+                    maxX = Mathf.Max(maxX, p.x + LevelGenerator.CELL / 2f);
+                    minZ = Mathf.Min(minZ, p.z - LevelGenerator.CELL / 2f);
+                    maxZ = Mathf.Max(maxZ, p.z + LevelGenerator.CELL / 2f);
+                }
+                bool gapOk = true;
+                foreach (var t in city.towers)
+                {
+                    float dx = Mathf.Max(Mathf.Max(minX - t.pos.x, 0f), t.pos.x - maxX);
+                    float dz = Mathf.Max(Mathf.Max(minZ - t.pos.y, 0f), t.pos.y - maxZ);
+                    gapOk &= new Vector2(dx, dz).magnitude >= 25f + t.r - 0.01f;
+                }
+                Assert.IsTrue(gapOk, tag + ": башни не ближе 25 м от этажа");
+                Object.DestroyImmediate(world.gameObject);
+                Zombie.All.Clear();
+                Pickup.All.Clear();
+                yield return null;
+            }
+
+            var w = new GameObject("TestWorld").transform;
+            GameRoot.World = w;
+            var level = new LevelGenerator();
+            level.Build(w, 6, 1, 77);
+            yield return Frames(2);
+            var win = level.glassWalls[0].window;
+            var fired = new List<GlassSection>();
+            win.Broken += s => fired.Add(s);
+            var sec = win.sections[0];
+            var pt = sec.Center;
+            var dir = -sec.outward;
+            sec.Hit(34f, pt, dir);
+            Assert.IsTrue(!sec.broken && sec.hp > 0f, "одно попадание только трескает стекло");
+            Assert.GreaterOrEqual(sec.transform.childCount, 2, "на стекле остаётся трещина");
+            sec.Hit(34f, pt, dir);
+            Assert.IsTrue(sec.broken && fired.Count == 1 && fired[0] == sec, "второе попадание разбивает секцию и шлёт событие");
+            foreach (var other in win.sections)
+                if (other != sec) Assert.IsFalse(other.broken, "соседняя секция цела");
+            yield return Frames(3);
+            // Луч снаружи до самой плоскости стекла и чуть внутрь, чтобы не задеть мебель в углу.
+            Assert.IsFalse(Physics.Raycast(pt - dir * 2f, dir, 2.3f, Layers.WorldMask, QueryTriggerInteraction.Ignore),
+                "сквозь разбитую секцию луч проходит");
+            if (win.sections.Count > 1)
+            {
+                var other = win.sections[1];
+                Assert.IsTrue(Physics.Raycast(other.Center - dir * 2f, dir, out var hit, 4f, Layers.WorldMask, QueryTriggerInteraction.Ignore)
+                    && hit.collider.GetComponent<GlassSection>() != null, "целая секция держит луч");
+            }
+            Object.DestroyImmediate(w.gameObject);
+            Zombie.All.Clear();
+            Pickup.All.Clear();
+            GameRoot.World = null;
+        }
+
+        /// Из разбитой секции вылетают и умирают, из целой — нет; вылетевший игрок не поднимается.
+        [UnityTest]
+        public IEnumerator WindowFall()
+        {
+            yield return null;
+            Root.OpenMenu();
+            var world = new GameObject("TestWorld").transform;
+            GameRoot.World = world;
+            var gen = new LevelGenerator();
+            gen.Build(world, 6, 1, 77);
+            foreach (var z in gen.zombies.ToArray())
+                if (z != null) Object.DestroyImmediate(z.gameObject);
+            Zombie.All.Clear();
+            yield return Frames(2);
+            var win = gen.glassWalls[0].window;
+            var outv = win.outward;
+            var brokenSec = win.sections[0];
+            var intactSec = win.sections[1];
+            brokenSec.Hit(34f, brokenSec.Center, -outv);
+            brokenSec.Hit(34f, brokenSec.Center, -outv);
+            Assert.IsTrue(brokenSec.broken, "окно: секция разбита");
+            yield return Frames(3);
+
+            Vector3 Inside(GlassSection s, float meters)
+            {
+                var p = s.Center - outv * meters;
+                p.y = 0.05f;
+                return p;
+            }
+
+            var camA = new GameObject("CamA").AddComponent<Camera>();
+            camA.transform.SetParent(world, false);
+            var attacker = Player.Create(0, null, camA, new PlayerHud(), gen.Center(gen.glassWalls[0].cell) + Vector3.up * 0.1f);
+            var zf = Spawn(Inside(brokenSec, 1f));
+            var causes = new List<string>();
+            zf.Died += c => causes.Add(c);
+            zf.aware = false;
+            zf.lookTimer = 100f;
+            yield return Frames(3);
+            zf.Kicked(outv, 17f, 8f, attacker);
+            yield return new WaitForSeconds(2.5f);
+            Assert.IsTrue(zf == null || (zf.dead && zf.falling && zf.transform.position.y < -1f), "зомби, выбитый в разбитое окно, падает и умирает");
+            Assert.AreEqual(1, attacker.kills, "падение засчитано как убийство");
+            Assert.IsTrue(causes.Contains("fall"), "событие смерти от падения");
+            Assert.IsFalse(Zombie.All.Contains(zf), "упавший больше не в списке живых");
+
+            var zi = Spawn(Inside(intactSec, 1f));
+            zi.aware = false;
+            zi.lookTimer = 100f;
+            yield return Frames(3);
+            zi.Kicked(outv, 17f, 8f, attacker);
+            yield return new WaitForSeconds(2f);
+            Assert.IsTrue(!zi.falling && zi.transform.position.y > -0.2f && Vector3.Dot(zi.transform.position - win.transform.position, outv) < 0f,
+                "у целой секции зомби остаётся в комнате");
+            Object.Destroy(zi.gameObject);
+
+            // Игрок: перешагнул плоскость в разбитой секции.
+            var camB = new GameObject("CamB").AddComponent<Camera>();
+            camB.transform.SetParent(world, false);
+            var hud = new PlayerHud();
+            var player = Player.Create(1, null, camB, hud, Inside(brokenSec, 0.8f));
+            player.GiveWeapon("pistol", 20);
+            yield return Frames(3);
+            for (int i = 0; i < 90 && !player.fell; i++)
+            {
+                // Ввода у тестового игрока нет, поэтому шагаем сдвигом положения.
+                player.Teleport(player.transform.position + outv * 0.08f);
+                yield return new WaitForFixedUpdate();
+            }
+            Assert.IsTrue(player.fell && player.downed && player.hp == 0f, "игрок, шагнувший в разбитое окно, выпал и умер");
+            // Напарник рядом, но выпавшего поднять нельзя.
+            var matePos = attacker.transform.position;
+            attacker.Teleport(player.transform.position);
+            for (int i = 0; i < 200; i++) player.TryRevive(0.05f);
+            attacker.Teleport(matePos);
+            Assert.IsTrue(player.downed && player.fell, "выпавшего поднять нельзя");
+            var kit = player.GetLoadout();
+            Assert.IsTrue(kit.owned.Count == 1 && kit.owned[0] == "knife" && kit.current == "knife" && kit.reserve["pistol"] == 0 && kit.mag["pistol"] == 0,
+                "после падения снаряжение — только нож");
+            yield return new WaitForSeconds(1.6f);
+            Assert.Less(player.transform.position.y, -1f, "выпавший игрок летит вниз");
+            Assert.AreEqual("РАЗБИЛСЯ", hud.deadText, "экран «РАЗБИЛСЯ»");
+            Object.DestroyImmediate(world.gameObject);
+            Zombie.All.Clear();
+            Pickup.All.Clear();
+            GameRoot.World = null;
+        }
+
+        [UnityTest]
         public IEnumerator SideDoors()
         {
             yield return null;
