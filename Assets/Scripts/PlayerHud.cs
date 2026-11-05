@@ -15,6 +15,9 @@ namespace ZombieCoop
         float hitTimer;
         float messageTimer;
         float damage;
+        /// Текст на чёрном экране выбывшего игрока; null — экран обычный.
+        public string deadText;
+        float deadFade;
 
         public void SetStatus(float hp, string weapon, string ammoText, int kills, bool downed, float revive)
         {
@@ -25,6 +28,13 @@ namespace ZombieCoop
                 messageTimer = 0.2f;
                 message = revive > 0f ? "ПОДНИМАЮТ… " + (int)(revive * 100f) + "%" : "ТЫ ПАЛ — ЖДИ НАПАРНИКА";
             }
+        }
+
+        /// Чёрный экран с текстом по центру (игрок выбыл до конца этажа); проявляется за полсекунды.
+        public void ShowDead(string text)
+        {
+            if (deadText == null) deadFade = 0f;
+            deadText = text;
         }
 
         public void SetLevel(string text) { level = text; }
@@ -45,6 +55,7 @@ namespace ZombieCoop
 
         public void Tick(float delta)
         {
+            if (deadText != null) deadFade = Mathf.Min(1f, deadFade + delta * 2f);
             damage = Mathf.Max(0f, damage - delta * 1.5f);
             if (hitTimer > 0f)
             {
@@ -86,6 +97,14 @@ namespace ZombieCoop
             GUI.Label(new Rect(r.x + 24 * scale, r.y + 16 * scale, r.width, 34 * scale), level, Style(S(22), TextAnchor.MiddleLeft, Color.white));
             if (message != "")
                 GUI.Label(new Rect(r.x, r.y + 60 * scale, r.width, 60 * scale), message, Style(S(34), TextAnchor.MiddleCenter, Color.white));
+            if (deadText != null)
+            {
+                GUI.color = new Color(0f, 0f, 0f, deadFade);
+                GUI.DrawTexture(r, Texture2D.whiteTexture);
+                GUI.color = new Color(1f, 1f, 1f, deadFade);
+                GUI.Label(r, deadText, Style(S(48), TextAnchor.MiddleCenter, Color.white));
+                GUI.color = Color.white;
+            }
         }
     }
 }

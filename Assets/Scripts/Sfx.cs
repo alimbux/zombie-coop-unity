@@ -18,7 +18,7 @@ namespace ZombieCoop
         static readonly Dictionary<string, AudioClip[]> cache = new Dictionary<string, AudioClip[]>();
         static int activeGroans;
 
-        public static readonly string[] All = { "shot", "splat", "crunch", "groan", "growl", "pain", "hurt", "click", "reload", "slash", "pickup" };
+        public static readonly string[] All = { "shot", "splat", "crunch", "groan", "growl", "pain", "hurt", "click", "reload", "slash", "pickup", "glass_crack", "glass_break" };
         public static readonly string[] Guns = { "pistol", "smg", "shotgun" };
         const string RECORDED_DIR = "ZombieCoop/Sounds/";
         /// Звуки попаданий по телу: у каждого шесть вариантов, а при проигрывании ещё и
@@ -155,6 +155,8 @@ namespace ZombieCoop
             // Попадания и шипение глушим: звонкие верха делают их игрушечными.
             if (System.Array.IndexOf(HitSounds, sound) >= 0 || sound == "snarl" || sound == "gurgle" || sound == "splat" || sound == "crunch")
                 output = Dark(output, sound == "hit_bone" || sound == "hit_skull" || sound == "crunch" ? 0.22f : 0.3f);
+            else if (sound == "glass_crack") output = Dark(output, 0.45f);
+            else if (sound == "glass_break") output = Dark(output, 0.4f);
             return output;
         }
 
@@ -173,6 +175,8 @@ namespace ZombieCoop
                 case "reload": return Mix(ClickSound(rng, 0f, 0.5f), ClickSound(rng, 0.35f, 0.5f));
                 case "slash": return Slash(rng);
                 case "pickup": return Pickup();
+                case "glass_crack": return GlassCrack(rng);
+                case "glass_break": return GlassBreak(rng);
                 case "hit_flesh": return HitFlesh(rng);
                 case "hit_bone": return HitBone(rng, rng.Range(150f, 240f), 0.2f);
                 case "hit_skull": return Mix(HitBone(rng, rng.Range(95f, 150f), 0.3f), Scaled(Squelch(rng, 0.3f), 0.5f));
@@ -679,6 +683,61 @@ namespace ZombieCoop
                 if (pop + j >= n) break;
                 float t = (float)j / RATE;
                 output[pop + j] += Mathf.Sin(G.TAU * 60f * t) * Mathf.Exp(-t * 30f) * 0.9f;
+            }
+            return output;
+        }
+
+        /// Сухой треск трескающегося стекла: короткий тик и пара глухих щелчков следом.
+        static float[] GlassCrack(Rng rng)
+        {
+            var output = new float[(int)(RATE * 0.16f)];
+            float[] ticks = { 0f, rng.Range(0.02f, 0.05f), rng.Range(0.06f, 0.1f) };
+            for (int k = 0; k < ticks.Length; k++)
+            {
+                int start = (int)(ticks[k] * RATE);
+                float amp = k == 0 ? 1f : 0.45f;
+                float f = rng.Range(1400f, 2300f);
+                int length = (int)(RATE * 0.025f);
+                for (int j = 0; j < length; j++)
+                {
+                    if (start + j >= output.Length) break;
+                    float t = (float)j / RATE;
+                    output[start + j] += (rng.Range(-1f, 1f) * 0.7f + Mathf.Sin(G.TAU * f * t) * 0.5f) * Mathf.Exp(-t * 180f) * amp;
+                }
+            }
+            return output;
+        }
+
+        /// Разбитое стекло: глухой хруст шумом, пачка коротких затухающих «дзинь» и осыпь мелочи.
+        static float[] GlassBreak(Rng rng)
+        {
+            int total = (int)(RATE * 1.2f);
+            var output = new float[total];
+            // Хруст: шум с рваной огибающей.
+            float gate = 0f;
+            int crunch = (int)(RATE * 0.5f);
+            for (int i = 0; i < crunch; i++)
+            {
+                float t = (float)i / RATE;
+                if (rng.Randf() < 0.004f) gate = rng.Range(0.5f, 1f);
+                gate *= 0.9993f;
+                output[i] += rng.Range(-1f, 1f) * (Mathf.Exp(-t * 9f) * 0.5f + gate * 0.5f) * Mathf.Exp(-t * 3f);
+            }
+            // Осколки звенят и сыплются: короткие тона на случайных моментах, чем дальше, тем тише.
+            int tinkles = rng.RangeI(14, 22);
+            for (int k = 0; k < tinkles; k++)
+            {
+                int start = (int)(rng.Range(0f, 0.9f) * RATE);
+                float f = rng.Range(1200f, 3200f);
+                float decay = rng.Range(35f, 90f);
+                float amp = rng.Range(0.15f, 0.5f) * (1f - (float)start / (RATE * 1.2f));
+                int length = (int)(RATE * 0.12f);
+                for (int j = 0; j < length; j++)
+                {
+                    if (start + j >= total) break;
+                    float t = (float)j / RATE;
+                    output[start + j] += Mathf.Sin(G.TAU * f * t) * Mathf.Exp(-t * decay) * amp;
+                }
             }
             return output;
         }
