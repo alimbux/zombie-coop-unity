@@ -53,6 +53,19 @@ namespace ZombieCoop
             }
         }
 
+        /// Чувствительность мыши: «=» / «+» — больше, «-» — меньше. Возвращает +1, -1 или 0.
+        public int SensitivityStep
+        {
+            get
+            {
+                var kb = Keyboard.current;
+                if (!keyboard || kb == null) return 0;
+                if (kb.equalsKey.wasPressedThisFrame || kb.numpadPlusKey.wasPressedThisFrame) return 1;
+                if (kb.minusKey.wasPressedThisFrame || kb.numpadMinusKey.wasPressedThisFrame) return -1;
+                return 0;
+            }
+        }
+
         public float Scroll => keyboard && MouseLocked && Mouse.current != null ? Mouse.current.scroll.ReadValue().y : 0f;
 
         public bool Fire =>

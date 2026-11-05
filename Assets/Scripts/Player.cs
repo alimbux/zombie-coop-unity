@@ -16,7 +16,27 @@ namespace ZombieCoop
         const float GRAVITY = 18f;
         const float EYE_HEIGHT = 1.6f;
         const float DOWNED_EYE_HEIGHT = 0.5f;
-        const float MOUSE_SENSITIVITY = 0.0025f;
+        // Радиан на пиксель движения мыши. В Godot было 0.0025, но Unity на macOS отдаёт
+        // смещение в «точках», а не в пикселях, и поворот получался вялым.
+        const float MOUSE_SENSITIVITY_DEFAULT = 0.006f;
+        const string MOUSE_SENSITIVITY_PREF = "mouse_sensitivity";
+        static float mouseSensitivity = -1f;
+
+        public static float MouseSensitivity
+        {
+            get
+            {
+                if (mouseSensitivity < 0f)
+                    mouseSensitivity = PlayerPrefs.GetFloat(MOUSE_SENSITIVITY_PREF, MOUSE_SENSITIVITY_DEFAULT);
+                return mouseSensitivity;
+            }
+            set
+            {
+                mouseSensitivity = Mathf.Clamp(value, 0.001f, 0.03f);
+                PlayerPrefs.SetFloat(MOUSE_SENSITIVITY_PREF, mouseSensitivity);
+                PlayerPrefs.Save();
+            }
+        }
         const float PAD_LOOK_SPEED = 2.8f;
         const float PAD_DEADZONE = 0.18f;
         const float AIM_ASSIST_SLOWDOWN = 0.45f;
@@ -197,8 +217,9 @@ namespace ZombieCoop
         public void AddMouseLook(Vector2 relative)
         {
             // В Godot мышь вниз — плюс по Y, в Unity — минус.
-            yaw += relative.x * MOUSE_SENSITIVITY * Mathf.Rad2Deg;
-            pitch = Mathf.Clamp(pitch + relative.y * MOUSE_SENSITIVITY, -1.4f, 1.4f);
+            float k = MouseSensitivity;
+            yaw += relative.x * k * Mathf.Rad2Deg;
+            pitch = Mathf.Clamp(pitch + relative.y * k, -1.4f, 1.4f);
         }
 
         public void TakeDamage(float amount)
@@ -232,6 +253,12 @@ namespace ZombieCoop
             }
             if (input != null)
             {
+                int step = input.SensitivityStep;
+                if (step != 0)
+                {
+                    MouseSensitivity *= step > 0 ? 1.25f : 0.8f;
+                    hud?.ShowMessage("ЧУВСТВИТЕЛЬНОСТЬ МЫШИ: " + Mathf.RoundToInt(MouseSensitivity / MOUSE_SENSITIVITY_DEFAULT * 100f) + "%", 1.2f);
+                }
                 AddMouseLook(input.MouseDelta);
                 float scroll = input.Scroll;
                 if (scroll > 0.1f) CycleWeapon(-1);
@@ -641,7 +668,7 @@ namespace ZombieCoop
             flashlight.range = 20f;
             flashlight.spotAngle = 52f;
             flashlight.innerSpotAngle = 30f;
-            flashlight.intensity = 4f;
+            flashlight.intensity = 5f;
             flashlight.shadows = LightShadows.Soft;
 
             muzzle = MeshKit.PointLight(cam.transform, Vector3.zero, 7f, 0f);

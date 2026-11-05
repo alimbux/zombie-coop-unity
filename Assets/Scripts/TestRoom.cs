@@ -34,7 +34,7 @@ namespace ZombieCoop
                 WorldEnvironment.Box(world, new Vector3(1.2f, 1.2f, 1.2f), new Vector3(p.x, 0.6f, p.y), 0.8f, G.Rand(0f, Mathf.PI));
 
             foreach (var p in new[] { new Vector3(0, HEIGHT - 0.3f, 0), new Vector3(-8, HEIGHT - 0.3f, 8), new Vector3(8, HEIGHT - 0.3f, -8) })
-                WorldEnvironment.Lamp(world, p, p + Vector3.up * 0.25f, new Vector3(0.6f, 0.08f, 0.6f), 9f, 1.1f, true);
+                WorldEnvironment.Lamp(world, p, p + Vector3.up * 0.25f, new Vector3(0.6f, 0.08f, 0.6f), 9f, 1.2f, true);
 
             // Точки те же, что в Godot-версии, с переводом осей: игроки стоят у одной стены
             // и смотрят в зал, зомби лезут с противоположной стороны.

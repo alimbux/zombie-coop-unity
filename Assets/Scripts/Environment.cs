@@ -13,6 +13,10 @@ namespace ZombieCoop
             RenderSettings.ambientMode = AmbientMode.Flat;
             float a = Mathf.LinearToGammaSpace(ambient);
             RenderSettings.ambientLight = new Color(a, a, a);
+            // URP берёт рассеянный свет из ambientProbe; задаём его явно (в линейных единицах).
+            var sh = new SphericalHarmonicsL2();
+            sh.AddAmbientLight(new Color(ambient, ambient, ambient));
+            RenderSettings.ambientProbe = sh;
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.Exponential;
             RenderSettings.fogDensity = fogDensity;

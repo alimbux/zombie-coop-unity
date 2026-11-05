@@ -1,4 +1,4 @@
-// Неосвещённый материал: кровь (единственный цвет в игре) и пятна крови.
+// Неосвещённый материал для URP: кровь (единственный цвет в игре) и пятна крови.
 // Текстура с прозрачностью обрезается по порогу, как alpha scissor в Godot.
 Shader "ZombieCoop/Unlit"
 {
@@ -11,55 +11,105 @@ Shader "ZombieCoop/Unlit"
     }
     SubShader
     {
-        Tags { "RenderType"="TransparentCutout" "Queue"="AlphaTest" }
+        Tags { "RenderType"="TransparentCutout" "Queue"="AlphaTest" "RenderPipeline"="UniversalPipeline" }
         Cull [_Cull]
+
+        HLSLINCLUDE
+        #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+        TEXTURE2D(_MainTex);
+        SAMPLER(sampler_MainTex);
+        CBUFFER_START(UnityPerMaterial)
+            float4 _MainTex_ST;
+            half4 _Color;
+            half _Cutoff;
+            half _Cull;
+        CBUFFER_END
+        ENDHLSL
 
         Pass
         {
-            CGPROGRAM
+            Name "Unlit"
+            Tags { "LightMode"="UniversalForward" }
+
+            HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
             #pragma multi_compile_fog
             #pragma multi_compile_instancing
-            #include "UnityCG.cginc"
 
-            sampler2D _MainTex;
-            float4 _MainTex_ST;
-            fixed4 _Color;
-            fixed _Cutoff;
-
-            struct appdata
+            struct Attributes
             {
-                float4 vertex : POSITION;
+                float4 positionOS : POSITION;
                 float2 uv : TEXCOORD0;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
-            struct v2f
+            struct Varyings
             {
-                float4 pos : SV_POSITION;
+                float4 positionCS : SV_POSITION;
                 float2 uv : TEXCOORD0;
-                UNITY_FOG_COORDS(1)
+                half fogFactor : TEXCOORD1;
             };
 
-            v2f vert (appdata v)
+            Varyings vert (Attributes v)
             {
-                v2f o;
+                Varyings o;
                 UNITY_SETUP_INSTANCE_ID(v);
-                o.pos = UnityObjectToClipPos(v.vertex);
+                o.positionCS = TransformObjectToHClip(v.positionOS.xyz);
                 o.uv = TRANSFORM_TEX(v.uv, _MainTex);
-                UNITY_TRANSFER_FOG(o, o.pos);
+                o.fogFactor = ComputeFogFactor(o.positionCS.z);
                 return o;
             }
 
-            fixed4 frag (v2f i) : SV_Target
+            half4 frag (Varyings i) : SV_Target
             {
-                fixed4 c = tex2D(_MainTex, i.uv) * _Color;
+                half4 c = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv) * _Color;
                 clip(c.a - _Cutoff);
-                UNITY_APPLY_FOG(i.fogCoord, c);
-                return fixed4(c.rgb, 1);
+                c.rgb = MixFog(c.rgb, i.fogFactor);
+                return half4(c.rgb, 1);
             }
-            ENDCG
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "DepthOnly"
+            Tags { "LightMode"="DepthOnly" }
+            ZWrite On ColorMask R
+
+            HLSLPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+            #pragma multi_compile_instancing
+
+            struct Attributes
+            {
+                float4 positionOS : POSITION;
+                float2 uv : TEXCOORD0;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
+
+            struct Varyings
+            {
+                float4 positionCS : SV_POSITION;
+                float2 uv : TEXCOORD0;
+            };
+
+            Varyings vert (Attributes v)
+            {
+                Varyings o;
+                UNITY_SETUP_INSTANCE_ID(v);
+                o.positionCS = TransformObjectToHClip(v.positionOS.xyz);
+                o.uv = TRANSFORM_TEX(v.uv, _MainTex);
+                return o;
+            }
+
+            half4 frag (Varyings i) : SV_Target
+            {
+                clip(SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv).a * _Color.a - _Cutoff);
+                return 0;
+            }
+            ENDHLSL
         }
     }
 }

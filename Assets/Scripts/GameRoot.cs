@@ -48,6 +48,8 @@ namespace ZombieCoop
             // Камеры из открытой сцены (если есть) не нужны: игра рисует всё сама.
             foreach (var c in Camera.allCameras) c.gameObject.SetActive(false);
             Layers.SetupCollisions();
+            if (UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline == null)
+                Debug.LogWarning("Zombie Coop: URP не назначен, материалы будут розовыми. Меню «Zombie Coop → Настроить URP».");
             screenCam = new GameObject("Screen").AddComponent<Camera>();
             screenCam.transform.SetParent(transform, false);
             screenCam.cullingMask = 0;
@@ -162,7 +164,7 @@ namespace ZombieCoop
             Text(new Rect(0, y, Screen.width, 90 * s),
                 "Игрок 1 — клавиатура и мышь (или геймпад, если их хватает на всех), остальные — геймпады.\n" +
                 "Стрельба — ЛКМ / RT, смена оружия — 1–4, Q, колесо / Y, перезарядка — R / X, удар ногой — F, ПКМ / RB,\n" +
-                "отдать патроны напарнику — G / B, поднять упавшего — стоять рядом, меню — Esc / Back.",
+                "отдать патроны напарнику — G / B, поднять упавшего — стоять рядом, чувствительность мыши — «-» / «=», меню — Esc / Back.",
                 16, new Color(0.55f, 0.55f, 0.55f), s);
         }
 

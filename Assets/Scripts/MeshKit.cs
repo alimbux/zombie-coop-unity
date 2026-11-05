@@ -415,6 +415,30 @@ namespace ZombieCoop
             }
         }
 
+        // URP: перед отрисовкой каждой камеры разворачиваем все надписи к ней.
+        static readonly List<Billboard> all = new List<Billboard>();
+        static bool hooked;
+
+        void OnEnable()
+        {
+            all.Add(this);
+            if (!hooked)
+            {
+                RenderPipelineManager.beginCameraRendering += OnBeginCamera;
+                hooked = true;
+            }
+        }
+
+        void OnDisable() { all.Remove(this); }
+
+        static void OnBeginCamera(ScriptableRenderContext ctx, Camera cam)
+        {
+            var rot = cam.transform.rotation;
+            for (int i = 0; i < all.Count; i++)
+                if (all[i] != null) all[i].transform.rotation = rot;
+        }
+
+        // Встроенный конвейер (на случай, если URP не назначен).
         void OnWillRenderObject()
         {
             var cam = Camera.current;

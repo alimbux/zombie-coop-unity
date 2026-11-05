@@ -152,7 +152,7 @@ namespace ZombieCoop
                     Wall(world, c, d, links[c].Contains(nb));
                 }
                 if (c == startCell || c == exitCell || rng.Randf() < 0.45f)
-                    WorldEnvironment.Lamp(world, b + Vector3.up * (HEIGHT - 0.4f), b + Vector3.up * (HEIGHT - 0.03f), new Vector3(0.6f, 0.06f, 0.6f), 8f, 1f, false);
+                    WorldEnvironment.Lamp(world, b + Vector3.up * (HEIGHT - 0.4f), b + Vector3.up * (HEIGHT - 0.03f), new Vector3(0.6f, 0.06f, 0.6f), 8f, 1.1f, false);
                 if (c != startCell && c != exitCell) Props(world, b);
             }
             ExitMarker(world);
@@ -217,7 +217,7 @@ namespace ZombieCoop
             var glow = MeshKit.Add(world, MeshKit.Box(new Vector3(2.4f, 0.04f, 2.4f)), exitMat, Vector3.zero, default, null, "Exit");
             glow.position = exitPosition + Vector3.up * 0.02f;
             MeshKit.Label(world, "ВЫХОД", exitPosition + Vector3.up * 2.2f, 0.34f);
-            MeshKit.PointLight(world, exitPosition + Vector3.up * 1f, 6f, 1.5f);
+            MeshKit.PointLight(world, exitPosition + Vector3.up * 1f, 6f, 2f);
         }
 
         // --- Зомби и предметы -------------------------------------------------------
