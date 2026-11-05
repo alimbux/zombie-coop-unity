@@ -92,10 +92,26 @@ Shader "ZombieCoop/Lit"
                 s.occlusion = 1;
                 s.alpha = 1;
 
-                half4 c = UniversalFragmentPBR(d, s);
-                c.rgb = MixFog(c.rgb, d.fogCoord);
-                c.a = 1;
-                return c;
+                // Свет считаем сами, а не через UniversalFragmentPBR: в Godot лампы по умолчанию
+                // гаснут как 1/d (omni_attenuation = 1), а в URP — как 1/d², и при тех же числах
+                // картинка выходила заметно темнее. Окно у границы радиуса в обоих движках
+                // одинаковое, (1 - (d/r)^4)^2, поэтому sqrt от затухания URP с этим окном
+                // и даёт затухание Godot.
+                BRDFData brdf;
+                InitializeBRDFData(s, brdf);
+                half3 color = d.bakedGI * brdf.diffuse;
+            #if defined(_ADDITIONAL_LIGHTS) || defined(_FORWARD_PLUS) || defined(_CLUSTER_LIGHT_LOOP)
+                InputData inputData = d;
+                uint pixelLightCount = GetAdditionalLightsCount();
+                LIGHT_LOOP_BEGIN(pixelLightCount)
+                    Light light = GetAdditionalLight(lightIndex, inputData.positionWS, inputData.shadowMask);
+                    light.distanceAttenuation = sqrt(max(light.distanceAttenuation, 0.0));
+                    color += LightingPhysicallyBased(brdf, light, inputData.normalWS, inputData.viewDirectionWS);
+                LIGHT_LOOP_END
+            #endif
+                color += s.emission;
+                color = MixFog(color, d.fogCoord);
+                return half4(color, 1);
             }
             ENDHLSL
         }
