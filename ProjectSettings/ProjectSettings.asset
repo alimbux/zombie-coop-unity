@@ -10,4 +10,4 @@ PlayerSettings:
   defaultScreenHeight: 900
   m_ActiveColorSpace: 1
   runInBackground: 1
-  activeInputHandler: 2
+  activeInputHandler: 1
