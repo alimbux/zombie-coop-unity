@@ -81,6 +81,8 @@ namespace ZombieCoop
         public const int Hitbox = 9;
         public const int Player = 10;
         public const int Debris = 11;
+        /// Лежащий труп: держится на полу, живые и игроки проходят сквозь него.
+        public const int Corpse = 20;
         /// Фигура игрока i (её не видит своя камера).
         public const int PlayerBody = 12;
         /// Оружие от первого лица игрока i (его видит только своя камера).
@@ -103,6 +105,8 @@ namespace ZombieCoop
             Physics.IgnoreLayerCollision(Debris, ZombieBody, true);
             Physics.IgnoreLayerCollision(Debris, World, false);
             Physics.IgnoreLayerCollision(Debris, Debris, false);
+            for (int i = 0; i < 32; i++)
+                if (i != World) Physics.IgnoreLayerCollision(Corpse, i, true);
         }
     }
 }

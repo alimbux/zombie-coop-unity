@@ -25,12 +25,24 @@ namespace ZombieCoop
         public Vector3 hitCenter = Vector3.zero;
     }
 
+    public enum ShapeKind { Sphere, Capsule, Box, Cylinder }
+
+    /// Из какой фигуры сделан меш: нужно, чтобы класть раны на поверхность тела
+    /// и не пускать части тела под пол.
+    public struct ShapeInfo
+    {
+        public ShapeKind kind;
+        public float radius, height, top, bottom;
+        public Vector3 size;
+    }
+
     /// Простые меши для фигур людей и зомби: капсулы, сферы, усечённые цилиндры, коробки.
     /// Меши одного размера переиспользуются, чтобы сотня зомби не плодила сотни копий.
     public static class MeshKit
     {
         static readonly Dictionary<string, Mesh> cache = new Dictionary<string, Mesh>();
         static readonly Dictionary<string, Material> materials = new Dictionary<string, Material>();
+        public static readonly Dictionary<Mesh, ShapeInfo> Shapes = new Dictionary<Mesh, ShapeInfo>();
         static Shader lit, unlit, text;
 
         public static Shader LitShader => lit ? lit : (lit = Resources.Load<Shader>("ZombieCoop/Lit"));
@@ -152,6 +164,7 @@ namespace ZombieCoop
             b.Rings(rows);
             mesh = b.Build(key);
             cache[key] = mesh;
+            Shapes[mesh] = new ShapeInfo { kind = ShapeKind.Capsule, radius = radius, height = height };
             return mesh;
         }
 
@@ -182,6 +195,7 @@ namespace ZombieCoop
             b.Rings(rows);
             mesh = b.Build(key);
             cache[key] = mesh;
+            Shapes[mesh] = new ShapeInfo { kind = ShapeKind.Sphere, radius = radius, height = height };
             return mesh;
         }
 
@@ -227,6 +241,7 @@ namespace ZombieCoop
             }
             mesh = b.Build(key);
             cache[key] = mesh;
+            Shapes[mesh] = new ShapeInfo { kind = ShapeKind.Cylinder, top = top, bottom = bottom, height = height };
             return mesh;
         }
 
@@ -251,6 +266,7 @@ namespace ZombieCoop
             }
             mesh = b.Build(key);
             cache[key] = mesh;
+            Shapes[mesh] = new ShapeInfo { kind = ShapeKind.Box, size = size };
             return mesh;
         }
 

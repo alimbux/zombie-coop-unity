@@ -13,12 +13,17 @@ namespace ZombieCoop
         const float WALL = 0.3f;
         const float DOOR = 2.2f;
         const float DOOR_HEIGHT = 2.4f;
+        /// Насколько сдвинута дверь от середины стены, если она у левого или правого края.
+        const float DOOR_SIDE = 2.6f;
         const int MAX_ZOMBIES = 150;
         static readonly Vector2Int[] Dirs = { new Vector2Int(1, 0), new Vector2Int(-1, 0), new Vector2Int(0, 1), new Vector2Int(0, -1) };
 
         Rng rng = new Rng(0);
         public List<Vector2Int> cells = new List<Vector2Int>();
         public Dictionary<Vector2Int, List<Vector2Int>> links = new Dictionary<Vector2Int, List<Vector2Int>>();
+        /// Сдвиг двери вдоль стены для каждой пары соседних комнат: 0 — по центру,
+        /// ±DOOR_SIDE — у одного из краёв.
+        public Dictionary<(Vector2Int, Vector2Int), float> doorOffsets = new Dictionary<(Vector2Int, Vector2Int), float>();
         public Vector2Int startCell = Vector2Int.zero;
         public Vector2Int exitCell = Vector2Int.zero;
         public Vector3 exitPosition = Vector3.zero;
@@ -68,13 +73,26 @@ namespace ZombieCoop
             var b = CellOf(to);
             if (a == b || !nextHop.TryGetValue(b, out var hops) || !hops.TryGetValue(a, out var n)) return to;
             var dir = new Vector3(n.x - a.x, 0f, n.y - a.y);
-            var door = (Center(a) + Center(n)) / 2f;
+            var door = DoorPosition(a, n);
             // Сначала выйти на линию двери, потом пройти сквозь проём.
             var side = new Vector3(Mathf.Abs(dir.z), 0f, Mathf.Abs(dir.x));
             var off = Vector3.Scale(from - door, side);
             if (off.magnitude > 0.5f && Mathf.Abs(Vector3.Dot(from - door, dir)) > 1f) return door - dir * 1f;
             return door + dir * 1f;
         }
+
+        /// Середина проёма между соседними комнатами a и b.
+        public Vector3 DoorPosition(Vector2Int a, Vector2Int b)
+        {
+            var mid = (Center(a) + Center(b)) / 2f;
+            float off = DoorOffset(a, b);
+            return mid + (a.x != b.x ? new Vector3(0, 0, off) : new Vector3(off, 0, 0));
+        }
+
+        public float DoorOffset(Vector2Int a, Vector2Int b) => doorOffsets.TryGetValue(Pair(a, b), out var o) ? o : 0f;
+
+        static (Vector2Int, Vector2Int) Pair(Vector2Int a, Vector2Int b) =>
+            a.x < b.x || (a.x == b.x && a.y < b.y) ? (a, b) : (b, a);
 
         // --- Планировка -------------------------------------------------------------
 
@@ -105,6 +123,16 @@ namespace ZombieCoop
                         links[c].Add(nb);
                         links[nb].Add(c);
                     }
+                }
+            // Двери не всегда посередине стены: примерно треть у левого края, треть у правого.
+            doorOffsets = new Dictionary<(Vector2Int, Vector2Int), float>();
+            foreach (var c in cells)
+                foreach (var nb in links[c])
+                {
+                    var key = Pair(c, nb);
+                    if (doorOffsets.ContainsKey(key)) continue;
+                    float roll = rng.Randf();
+                    doorOffsets[key] = roll < 0.4f ? 0f : (roll < 0.7f ? -DOOR_SIDE : DOOR_SIDE);
                 }
         }
 
@@ -153,7 +181,7 @@ namespace ZombieCoop
                 }
                 if (c == startCell || c == exitCell || rng.Randf() < 0.45f)
                     WorldEnvironment.Lamp(world, b + Vector3.up * (HEIGHT - 0.4f), b + Vector3.up * (HEIGHT - 0.03f), new Vector3(0.6f, 0.06f, 0.6f), 8f, 1.1f, false);
-                if (c != startCell && c != exitCell) Props(world, b);
+                if (c != startCell && c != exitCell) Props(world, c);
             }
             ExitMarker(world);
         }
@@ -168,25 +196,49 @@ namespace ZombieCoop
                 WorldEnvironment.Box(world, alongZ ? new Vector3(WALL, HEIGHT, CELL) : new Vector3(CELL, HEIGHT, WALL), mid, shade);
                 return;
             }
-            float seg = (CELL - DOOR) / 2f;
-            float shift = DOOR / 2f + seg / 2f;
-            foreach (float sign in new[] { -1f, 1f })
+            // Проём: стена до двери и стена после неё, сдвиг двери вдоль стены — off.
+            float off = DoorOffset(c, c + d);
+            foreach (float side in new[] { -1f, 1f })
             {
-                var offset = alongZ ? new Vector3(0, 0, shift * sign) : new Vector3(shift * sign, 0, 0);
+                float near = off + side * DOOR / 2f;
+                float far = side * CELL / 2f;
+                float seg = Mathf.Abs(far - near);
+                if (seg < 0.01f) continue;
+                float along = (near + far) / 2f;
+                var offset = alongZ ? new Vector3(0, 0, along) : new Vector3(along, 0, 0);
                 WorldEnvironment.Box(world, alongZ ? new Vector3(WALL, HEIGHT, seg) : new Vector3(seg, HEIGHT, WALL), mid + offset, shade);
             }
             float lintelH = HEIGHT - DOOR_HEIGHT;
-            var lintelPos = new Vector3(mid.x, DOOR_HEIGHT + lintelH / 2f, mid.z);
+            var doorMid = mid + (alongZ ? new Vector3(0, 0, off) : new Vector3(off, 0, 0));
+            var lintelPos = new Vector3(doorMid.x, DOOR_HEIGHT + lintelH / 2f, doorMid.z);
             WorldEnvironment.Box(world, alongZ ? new Vector3(WALL, lintelH, DOOR) : new Vector3(DOOR, lintelH, WALL), lintelPos, shade);
         }
 
         /// Мебель по углам комнаты, чтобы проходы между дверями оставались свободными.
-        void Props(Transform world, Vector3 b)
+        /// Угол, к которому прижата дверь, остаётся пустым.
+        bool CornerHasDoor(Vector2Int c, Vector2 corner)
         {
-            var corners = new List<Vector2> { new Vector2(-1, -1), new Vector2(1, -1), new Vector2(-1, 1), new Vector2(1, 1) };
+            foreach (var nb in links[c])
+            {
+                var d = nb - c;
+                float off = DoorOffset(c, nb);
+                if (off == 0f) continue;
+                // Стена по x (дверь сдвинута по z) или по z (дверь сдвинута по x).
+                if (d.x != 0 && corner.x == d.x && corner.y == Mathf.Sign(off)) return true;
+                if (d.y != 0 && corner.y == d.y && corner.x == Mathf.Sign(off)) return true;
+            }
+            return false;
+        }
+
+        void Props(Transform world, Vector2Int c)
+        {
+            var b = Center(c);
+            var corners = new List<Vector2>();
+            foreach (var corner in new[] { new Vector2(-1, -1), new Vector2(1, -1), new Vector2(-1, 1), new Vector2(1, 1) })
+                if (!CornerHasDoor(c, corner)) corners.Add(corner);
             G.Shuffle(corners, rng.Raw);
             float inset = CELL / 2f - 1.3f;
-            for (int i = rng.RangeI(1, 3) - 1; i >= 0; i--)
+            for (int i = Mathf.Min(rng.RangeI(1, 3), corners.Count) - 1; i >= 0; i--)
             {
                 var p = corners[i] * inset;
                 var pos = b + new Vector3(p.x, 0, p.y);

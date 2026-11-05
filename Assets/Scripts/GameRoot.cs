@@ -209,6 +209,7 @@ namespace ZombieCoop
                 World = null;
             }
             Zombie.All.Clear();
+            Zombie.Corpses.Clear();
             Player.All.Clear();
             Pickup.All.Clear();
             Gore.Clear();

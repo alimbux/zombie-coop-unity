@@ -11,7 +11,7 @@ namespace ZombieCoop
         const int MAX_STAINS = 400;
         const int MAX_DEBRIS = 80;
 
-        static Material bloodMat, brainMat;
+        static Material bloodMat, brainMat, darkMat, meatMat, holeMat, boneMat;
         static int layer;
         public static readonly List<GameObject> Stains = new List<GameObject>();
         static readonly List<GameObject> debris = new List<GameObject>();
@@ -33,6 +33,55 @@ namespace ZombieCoop
                 if (brainMat == null) brainMat = MeshKit.Lit(new Color(0.78f, 0.5f, 0.52f), new Color(0.12f, 0.05f, 0.05f), 0f, 0.65f);
                 return brainMat;
             }
+        }
+
+        /// Тёмная запёкшаяся кровь: ей пропитывается одежда, из неё куски мяса.
+        /// Без освещения, как и яркая кровь, иначе в тени фильтр сделает её серой.
+        public static Material DarkBloodMaterial
+        {
+            get
+            {
+                if (darkMat == null) darkMat = MeshKit.Unlit(new Color(0.38f, 0f, 0.02f));
+                return darkMat;
+            }
+        }
+
+        /// Мясо в ране: влажное, с бликом, фильтр оставляет его красным.
+        public static Material MeatMaterial
+        {
+            get
+            {
+                if (meatMat == null) meatMat = MeshKit.Lit(new Color(0.75f, 0.12f, 0.14f), Color.black, 0f, 0.75f);
+                return meatMat;
+            }
+        }
+
+        /// Чёрная глубина пулевого отверстия.
+        public static Material HoleMaterial
+        {
+            get
+            {
+                if (holeMat == null) holeMat = MeshKit.Unlit(new Color(0.03f, 0f, 0f));
+                return holeMat;
+            }
+        }
+
+        /// Торчащая кость, рёбра.
+        public static Material BoneMaterial
+        {
+            get
+            {
+                if (boneMat == null) boneMat = MeshKit.Lit(new Color(0.92f, 0.9f, 0.85f), Color.black, 0f, 0.5f);
+                return boneMat;
+            }
+        }
+
+        /// Куски мяса, вылетающие из раны: тёмно-красные комки разного размера летят по пуле
+        /// и вбок, падают на пол.
+        public static void Chunks(Vector3 point, Vector3 dir, int amount)
+        {
+            if (Fx.Instance == null) return;
+            Fx.Instance.Burst(Fx.Kind.Chunk, point, (dir.normalized + Vector3.up * 0.4f).normalized, amount, 1.5f, 5f, 50f, 1.1f, 16f, 0.5f, 1.2f);
         }
 
         public static void Clear()
@@ -226,10 +275,54 @@ namespace ZombieCoop
             if (kind == "streak") stretch = G.Rand(1.6f, 2.6f);
             else if (kind == "smear") stretch = G.Rand(1.2f, 1.8f);
             float w = radius * G.Rand(0.8f, 1.25f);
-            go.transform.localScale = new Vector3(w, 1f, w * stretch * G.Rand(0.9f, 1.15f));
+            float lenK = stretch * G.Rand(0.9f, 1.15f);
+            // Пятно не должно свисать с края стены, колонны или ступеньки: проверяем, что
+            // под краями тоже есть та же поверхность. Если нет — уменьшаем, а не вешаем в воздух.
+            bool fits = false;
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                if (Covered(go.transform, w, w * lenK))
+                {
+                    fits = true;
+                    break;
+                }
+                w *= 0.55f;
+            }
+            if (!fits)
+            {
+                Object.Destroy(go);
+                return null;
+            }
+            go.transform.localScale = new Vector3(w, 1f, w * lenK);
             Track(Stains, go, MAX_STAINS);
             return go;
         }
+
+        /// Лежит ли прямоугольник пятна (полуоси hx, hz) целиком на плоской поверхности.
+        /// t — положение и поворот пятна (ось Y — нормаль).
+        public static bool Covered(Transform t, float hx, float hz) => Covered(t.position, t.rotation, hx, hz);
+
+        public static bool Covered(Vector3 origin, Quaternion rot, float hx, float hz)
+        {
+            var n = rot * Vector3.up;
+            var ax = rot * Vector3.right;
+            var az = rot * Vector3.forward;
+            // Края текстуры прозрачные, сама клякса занимает примерно 70% квадрата.
+            for (int i = 0; i < 8; i++)
+            {
+                var c = Corners[i];
+                var at = origin + ax * hx * 0.7f * c.x + az * hz * 0.7f * c.y;
+                if (!Physics.Raycast(at + n * 0.06f, -n, out var hit, 0.12f, Layers.WorldMask, QueryTriggerInteraction.Ignore)) return false;
+                if (Vector3.Dot(hit.normal, n) < 0.9f) return false;
+            }
+            return true;
+        }
+
+        static readonly Vector2[] Corners =
+        {
+            new Vector2(1, 1), new Vector2(-1, 1), new Vector2(1, -1), new Vector2(-1, -1),
+            new Vector2(1, 0), new Vector2(-1, 0), new Vector2(0, 1), new Vector2(0, -1),
+        };
 
         /// Пятно на полу под точкой (капли с ран, след ползущего).
         public static GameObject FloorStain(Vector3 point, string kind, float radius, Vector3 along = default)
@@ -273,6 +366,32 @@ namespace ZombieCoop
             p.y = Mathf.Lerp(fromPosY, toPosY, t);
             transform.localPosition = p;
             if (t >= 1f) enabled = false;
+        }
+    }
+
+    /// Плавно меняет размер узла (рана раскрывается, лужа растекается, кишки свисают).
+    public class ScaleTo : MonoBehaviour
+    {
+        Vector3 from, to;
+        float duration = 1f, t;
+        bool easeOut;
+
+        public static ScaleTo Run(Transform node, Vector3 target, float duration, bool easeOut = false)
+        {
+            var s = node.gameObject.AddComponent<ScaleTo>();
+            s.from = node.localScale;
+            s.to = target;
+            s.duration = Mathf.Max(duration, 0.001f);
+            s.easeOut = easeOut;
+            return s;
+        }
+
+        void Update()
+        {
+            t = Mathf.Min(1f, t + Time.deltaTime / duration);
+            float k = easeOut ? 1f - (1f - t) * (1f - t) : t;
+            transform.localScale = Vector3.LerpUnclamped(from, to, k);
+            if (t >= 1f) Destroy(this);
         }
     }
 }

@@ -328,7 +328,7 @@ namespace ZombieCoop
             else
             {
                 fireCooldown = 0.4f;
-                Sfx.PlayFlat("click", -6f);
+                Sfx.PlayFlat("click_" + current, -2f);
                 hud?.ShowMessage("НЕТ ПАТРОНОВ", 1f);
             }
         }
@@ -378,8 +378,8 @@ namespace ZombieCoop
                 mag[current] -= 1;
                 shake = Mathf.Max(shake, 0.12f + (st.pellets > 1 ? 0.1f : 0f));
                 muzzle.intensity = 6f;
-                float pitchScale = current == "smg" ? 1.25f : current == "shotgun" ? 0.7f : 1f;
-                Sfx.PlayFlat("shot", current != "smg" ? -2f : -5f, pitchScale);
+                // Дробовик громче всех, очередь автомата тише одиночного выстрела, чтобы не глушила.
+                Sfx.PlayFlat("shot_" + current, current == "smg" ? -6f : current == "shotgun" ? -3f : -4f);
                 AlertZombies(st.noise);
             }
             Physics.SyncTransforms();
@@ -403,7 +403,13 @@ namespace ZombieCoop
                     continue;
                 }
                 var zone = hit.collider.GetComponent<HitZone>();
-                if (zone == null || zone.zombie == null || zone.zombie.dead) continue;
+                if (zone == null || zone.zombie == null) continue;
+                if (zone.zombie.dead)
+                {
+                    // Труп дёргается от пуль, его можно разорвать на куски.
+                    zone.zombie.HitCorpse(zone.zone, st.damage, hit.point, dir, st.knockback);
+                    continue;
+                }
                 bool loud = !hitZombies.Contains(zone.zombie);
                 hitZombies.Add(zone.zombie);
                 if (zone.zombie.TakeHit(zone.zone, st.damage, hit.point, dir, loud, st.knockback)) kills++;
@@ -460,7 +466,8 @@ namespace ZombieCoop
         {
             if (!Ray(cam.transform.forward, 60f, out var hit)) return "";
             var zone = hit.collider.GetComponent<HitZone>();
-            return zone != null ? zone.zone : "";
+            if (zone == null || (zone.zombie != null && zone.zombie.dead)) return "";
+            return zone.zone;
         }
 
         bool Ray(Vector3 dir, float length, out RaycastHit hit)
@@ -479,7 +486,7 @@ namespace ZombieCoop
             int size = Weapons.Get(current).mag;
             if (reloadLeft > 0f || mag[current] >= size || reserve[current] <= 0) return;
             reloadLeft = Weapons.Get(current).reload;
-            Sfx.PlayFlat("reload", -4f);
+            Sfx.PlayFlat("reload_" + current, -3f);
         }
 
         void FinishReload()

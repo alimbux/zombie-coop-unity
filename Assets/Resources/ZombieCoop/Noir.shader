@@ -55,7 +55,7 @@ Shader "ZombieCoop/Noir"
 
                 // Насколько пиксель «красный»: только кровь в игре имеет такой цвет.
                 float redness = saturate((c.r - max(c.g, c.b)) * 3.0);
-                float3 blood = float3(max(c.r, 0.6), 0.0, 0.02);
+                float3 blood = float3(max(c.r, 0.3), 0.0, 0.02);
                 float3 col = lerp(float3(lum, lum, lum), blood, redness);
 
                 float t = _Time.y;
